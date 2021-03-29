@@ -78,8 +78,42 @@ static const uint32_t crc_table[256] = {
 
 /* ========================================================================= */
 
+#define WUFFS_IMPLEMENTATION
+#define WUFFS_CONFIG__MODULES
+#define WUFFS_CONFIG__MODULE__BASE
+#define WUFFS_CONFIG__MODULE__CRC32
+#include "/path/to/your/copy/of/github.com/google/wuffs/release/c/wuffs-v0.3.c"
+
 void crc32 ( const void * key, int len, uint32_t seed, void * out )
 {
+  if (1) {  // 1: use Wuffs' CRC-32. 0: use SMHasher's CRC-32.
+    wuffs_crc32__ieee_hasher h;
+    wuffs_base__status status =
+        h.initialize(sizeof__wuffs_crc32__ieee_hasher(), WUFFS_VERSION,
+                     WUFFS_INITIALIZE__DEFAULT_OPTIONS);
+    if (!status.is_ok()) {
+      *(uint32_t*)out = 0;
+      return;
+    }
+
+    // Wuffs' CRC-32 implementation doesn't have an API to use a seed other
+    // than zero. It's not really a common thing to do. Usually we just want
+    // the CRC-32 hash of some (key, len) data. Here, we fiddle with the
+    // h.private_impl.f_state field so that the SMHasher tests pass.
+    //
+    // We also call update_u32 with an empty slice, before setting the
+    // h.private_impl.f_state field. Hashing an empty slice is a no-op in that
+    // f_state stays zero, but it also has a side-effect of switching h to use
+    // the SIMD-accelerated code path. This wouldn't be necessary if we didn't
+    // mess with h's private implementation.
+    h.update_u32(wuffs_base__empty_slice_u8());
+    h.private_impl.f_state = seed;
+
+    *(uint32_t*)out = h.update_u32(wuffs_base__make_slice_u8(
+        static_cast<uint8_t*>(const_cast<void*>(key)), len));
+    return;
+  }
+
   uint8_t * buf = (uint8_t*)key;
   uint32_t crc = seed ^ 0xffffffffL;
 
